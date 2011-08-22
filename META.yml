@@ -1,21 +1,27 @@
---- #YAML:1.0
-name:               DBIx-Class-OptimisticLocking
-version:            0.01
-abstract:           Optimistic locking support for
+---
+abstract: 'Optimistic locking support for DBIx::Class'
 author:
-    - Brian Phillips <bphillips@cpan.org>
-license:            perl
-distribution_type:  module
+  - 'Brian Phillips <bphillips@cpan.org>'
+build_requires:
+  Cwd: 0
+  DBIx::Class::Schema: 0
+  File::Find: 0
+  File::Spec: 0
+  File::Temp: 0
+  Test::More: 0
 configure_requires:
-    ExtUtils::MakeMaker:  0
-requires:
-    DBIx::Class:  0
-    Test::More:   0
-no_index:
-    directory:
-        - t
-        - inc
-generated_by:       ExtUtils::MakeMaker version 6.48
+  ExtUtils::MakeMaker: 6.30
+dynamic_config: 0
+generated_by: 'Dist::Zilla version 4.200012, CPAN::Meta::Converter version 2.101610'
+license: perl
 meta-spec:
-    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
-    version:  1.4
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: DBIx-Class-OptimisticLocking
+requires:
+  Carp: 0
+  DBIx::Class: 0.08195
+  List::Util: 0
+resources:
+  repository: http://github.com/brianphillips/dbix-class-optimisticlocking
+version: 0.02

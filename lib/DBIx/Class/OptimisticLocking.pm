@@ -1,23 +1,130 @@
 package DBIx::Class::OptimisticLocking;
+BEGIN {
+  $DBIx::Class::OptimisticLocking::VERSION = '0.02';
+}
 
-use warnings;
+# ABSTRACT: Optimistic locking support for DBIx::Class
+
 use strict;
+use warnings;
 
+use DBIx::Class 0.08195;
 use base 'DBIx::Class';
 use Carp qw(croak);
+use List::Util qw(first);
+
+
+__PACKAGE__->mk_classdata( optimistic_locking_strategy => 'dirty' );
+__PACKAGE__->mk_classdata('optimistic_locking_ignore_columns');
+__PACKAGE__->mk_classdata( optimistic_locking_version_column => 'version' );
+
+my %valid_strategies = map { $_ => undef } qw(dirty all none version);
+
+sub optimistic_locking_strategy {
+	my @args = @_;
+	my $class = shift(@args);
+	my ($strategy) = $args[0];
+	croak "invalid optimistic_locking_strategy $strategy" unless exists $valid_strategies{$strategy};
+	return $class->_opt_locking_strategy_accessor(@args);
+}
+
+
+sub update {
+	my $self = shift;
+	my $upd = shift;
+
+	# we have to do this ahead of time to make sure our WHERE
+	# clause is computed correctly
+	$self->set_inflated_columns($upd) if($upd);
+
+	# short-circuit if we're not changed
+	return $self if !$self->is_changed;
+
+    if ( $self->optimistic_locking_strategy eq 'version' ) {
+		# increment the version number but only if there are dirty
+		# columns that are not being ignored by the optimistic
+		# locking
+
+		my %dirty_columns = $self->get_dirty_columns;
+
+		delete(@dirty_columns{ @{ $self->optimistic_locking_ignore_columns || [] } });
+
+		if(%dirty_columns){
+			my $v_col = $self->optimistic_locking_version_column;
+
+			my $current_version = $self->{_column_data_in_storage}{$v_col};
+			$current_version = $self->get_column($v_col) || 0 if ! defined $current_version;
+
+			# increment the version
+			$self->set_column( $v_col, $current_version + 1);
+		}
+    }
+
+	my $return = $self->next::method();
+
+	return $return;
+}
+
+
+sub _track_storage_value {
+	my ( $self, $col ) = @_;
+
+	return 1 if $self->next::method($col);
+
+	my $mode = $self->optimistic_locking_strategy;
+	my $ignore_columns = $self->optimistic_locking_ignore_columns || [];
+
+	if ( $mode eq 'dirty' || $mode eq 'all' ) {
+		return !first { $col eq $_ } @$ignore_columns;    # implicit return from do block
+	} elsif ( $mode eq 'version' ) {
+		return $col eq $self->optimistic_locking_version_column;    # implicit return from do block
+	}
+
+	return 0;
+}
+
+
+sub _storage_ident_condition {
+	my $self = shift;
+	my $ident_condition = $self->next::method(@_);
+
+	# YUCK YUCK YUCK
+	my(undef,undef,undef,$caller) = caller(1);
+	return $ident_condition if $caller eq 'DBIx::Class::Row::get_from_storage';
+
+	my $mode = $self->optimistic_locking_strategy;
+
+	my $ignore_columns = $self->optimistic_locking_ignore_columns || [];
+		
+	if ( $mode eq 'dirty' ) {
+        my %orig = %{$self->{_column_data_in_storage} || {}};
+		delete @orig{@$ignore_columns};
+        $ident_condition = {%orig, %$ident_condition };
+	} elsif ( $mode eq 'version' ) {
+		my $v_col = $self->optimistic_locking_version_column;
+		$ident_condition->{ $v_col } = defined $self->{_column_data_in_storage}{$v_col} ? $self->{_column_data_in_storage}{$v_col} : $self->get_column($v_col);
+	} elsif ( $mode eq 'all' ) {
+        my %orig = ($self->get_columns, %{$self->{_column_data_in_storage} || {}});
+		delete @orig{@$ignore_columns};
+		$ident_condition = { %orig, %$ident_condition };
+	}
+
+	return $ident_condition;
+}
+
+
+1; # End of DBIx::Class::OptimisticLocking
+
+__END__
+=pod
 
 =head1 NAME
 
-DBIx::Class::OptimisticLocking - Optimistic locking support for
-DBIx::Class
+DBIx::Class::OptimisticLocking - Optimistic locking support for DBIx::Class
 
 =head1 VERSION
 
-Version 0.01
-
-=cut
-
-our $VERSION = '0.01';
+version 0.02
 
 =head1 SYNOPSIS
 
@@ -58,7 +165,7 @@ block of code):
 	$order->update; # this succeeds
 	$other_order->update; # this fails when using optimistic locking
 
-Without optimistic locking (or exclusive locking), the example order
+Without locking (optimistic or exclusive ), the example order
 would have two sequential updates issued with the second essentially
 erasing the results of the first.  With optimistic locking, the second
 update (on C<$other_order>) would fail.
@@ -121,62 +228,7 @@ you can optionally specify a different name for the column used for
 version tracking.  If an alternate name is not passed, the component
 will look for a column named C<version> in your model.
 
-=cut
-
-__PACKAGE__->mk_classdata(optimistic_locking_strategy => 'dirty');
-__PACKAGE__->mk_classdata('optimistic_locking_ignore_columns');
-__PACKAGE__->mk_classdata(optimistic_locking_version_column => 'version');
-
-my %valid_strategies = map { $_ => undef } qw(dirty all none version);
-
-sub optimistic_locking_strategy {
-	my @args = @_;
-	my $class = shift(@args);
-	my ($strategy) = $args[0];
-	croak "invalid optimistic_locking_strategy $strategy" unless exists $valid_strategies{$strategy};
-	return $class->_opt_locking_strategy_accessor(@args);
-}
-
-sub _get_original_columns {
-	my $self = shift;
-	my %columns = ( $self->get_columns, %{ $self->{_opt_locking_orig_values} || {} } );
-	return %columns;
-}
-
-
-sub _get_original_column {
-	my $self = shift;
-	my $column = shift;
-	my %columns = $self->_get_original_columns;
-	return exists $columns{$column} ? $columns{$column} : ();
-}
-
 =head1 EXTENDED METHODS
-
-=head2 set_column
-
-See L<DBIx::Class::Row::set_column> for basic usage.
-
-In addition to the basic functionality, this method will track the
-original value of the column if the optimistic locking mode is set
-to C<dirty> or C<all> and this is the first time this column has been
-updated.  So it can be used as a C<WHERE> condition when the C<UPDATE>
-is issued.
-
-=cut
-
-sub set_column {
-	my @args = @_;
-	my $self = shift(@args);
-	my ($column) = $args[0];
-
-	# save off the original if this is the first time the column has been changed
-	if($self->optimistic_locking_strategy ne 'none' && !$self->is_column_changed($column)){
-
-            $self->{_opt_locking_orig_values}->{$column} = $self->get_column($column);
-	}
-	return $self->next::method(@args);
-}
 
 =head2 update
 
@@ -187,79 +239,24 @@ criteria that will be used in the C<WHERE> clause in the C<UPDATE>. The
 criteria that is used depends on the L<CONFIGURATION> defined in the
 model class.
 
-=cut
+=head2 _track_storage_value
 
-sub update {
-	my $self = shift;
-	my $upd = shift;
+This is a method internal to L<DBIx::Class::Row> that basically serves
+as a predicate method that indicates whether or not the orginal value
+of the row (as loaded from storage) should be recorded when it is updated.
 
-	# we have to do this ahead of time to make sure our WHERE
-	# clause is computed correctly
-	$self->set_inflated_columns($upd) if($upd);
+Typically, only primary key values are persisted but for
+L<DBIx::Class::OptimisticLocking>, this list is augmented to include other
+columns based on the optimistic locking strategy that is configured for
+this L<DBIx::Class::ResultSource>.  For instance, if the chosen strategy
+is 'C<dirty>' (the default), every column's original value will be tracked
+in order to generate the appropriate C<WHERE> clause in any subsequent
+C<UPDATE> operations.
 
-	# short-circuit if we're not changed
-	return $self if !$self->is_changed;
+=head2 _storage_ident_condition
 
-    if ( $self->optimistic_locking_strategy eq 'version' ) {
-		# increment the version number but only if there are dirty
-		# columns that are not being ignored by the optimistic
-		# locking
-
-		my %dirty_columns = $self->get_dirty_columns;
-
-		delete(@dirty_columns{ @{ $self->optimistic_locking_ignore_columns || [] } });
-
-		if(%dirty_columns){
-			my $v_col = $self->optimistic_locking_version_column;
-
-			# increment the version
-			$self->set_column( $v_col, $self->_get_original_column($v_col) + 1 );
-		}
-    }
-
-	# DBIx::Class::Row::update looks at this value, we'll precompute it
-	# here to make sure it has all the elements we need (kind of a hack)
-	$self->{_orig_ident} = $self->_optimistic_locking_ident_condition;
-
-	my $return = $self->next::method();
-
-	# flush the original values cache
-	undef $self->{_opt_locking_orig_values};
-
-	return $return;
-}
-
-sub _optimistic_locking_ident_condition {
-	my $self = shift;
-	my $ident_condition = $self->{_orig_ident} || $self->ident_condition;
-	my $mode = $self->optimistic_locking_strategy;
-
-	my $ignore_columns = $self->optimistic_locking_ignore_columns || [];
-		
-	if ( $mode eq 'dirty' ) {
-
-        my %orig = %{$self->{_opt_locking_orig_values} || {}};
-		delete($orig{$_}) foreach(@$ignore_columns);
-        $ident_condition = {%orig, %$ident_condition };
-
-	} elsif ( $mode eq 'version' ) {
-		my $v_col = $self->optimistic_locking_version_column;
-		$ident_condition->{ $v_col } = $self->_get_original_column( $v_col );
-
-	} elsif ( $mode eq 'all' ) {
-
-		my %orig = $self->_get_original_columns;
-		delete($orig{$_}) foreach(@$ignore_columns);
-		$ident_condition = { %orig, %$ident_condition };
-	}
-
-	return $ident_condition;
-}
-
-
-=head1 AUTHOR
-
-Brian Phillips, C<< <bphillips at cpan.org> >>
+This is an internal method to L<DBIx::Class::PK> that generates the C<WHERE>
+clause for update and delete operations.
 
 =head1 BUGS
 
@@ -273,41 +270,21 @@ You can find documentation for this module with the perldoc command.
 
     perldoc DBIx::Class::OptimisticLocking
 
-
-You can also look for information at:
-
-=over 4
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=DBIx-Class-OptimisticLocking>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/DBIx-Class-OptimisticLocking>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/DBIx-Class-OptimisticLocking>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/DBIx-Class-OptimisticLocking/>
-
-=back
-
-
 =head1 ACKNOWLEDGEMENTS
 
+Credit goes to the Java ORM package L<Hibernate|http://hibernate.org>
+for inspiring me to write this for L<DBIx::Class>.
 
-=head1 COPYRIGHT & LICENSE
+=head1 AUTHOR
 
-Copyright 2008 Brian Phillips, all rights reserved.
+  Brian Phillips <bphillips@cpan.org>
 
-This program is free software; you can redistribute it and/or modify it
-under the same terms as Perl itself.
+=head1 COPYRIGHT AND LICENSE
 
+This software is copyright (c) 2011 by Brian Phillips.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
 
-1; # End of DBIx::Class::OptimisticLocking

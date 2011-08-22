@@ -1,11 +1,12 @@
-.cvsignore
-.gitignore
 Changes
-lib/DBIx/Class/OptimisticLocking.pm
+LICENSE
+MANIFEST
+META.yml
 Makefile.PL
-MANIFEST			This list of files
 README
-t/00-load.t
+dist.ini
+lib/DBIx/Class/OptimisticLocking.pm
+t/00-compile.t
 t/01-dirty.t
 t/02-dirty-ignored.t
 t/03-all.t
@@ -13,10 +14,9 @@ t/04-all-ignored.t
 t/05-version.t
 t/06-version-custom-column.t
 t/07-version-with-ignored.t
-t/boilerplate.t
+t/08-none.t
 t/lib/OLTest.pm
 t/lib/OLTest/Schema.pm
-t/lib/OLTest/Schema/.TestVersionIgnored.pm.swp
 t/lib/OLTest/Schema/TestAll.pm
 t/lib/OLTest/Schema/TestAllIgnored.pm
 t/lib/OLTest/Schema/TestDirty.pm
@@ -25,11 +25,7 @@ t/lib/OLTest/Schema/TestDirtyInsignificant.pm
 t/lib/OLTest/Schema/TestVersion.pm
 t/lib/OLTest/Schema/TestVersionAlt.pm
 t/lib/OLTest/Schema/TestVersionIgnored.pm
-t/perlcritic.t
-t/perlcriticrc
-t/pod-coverage.t
-t/pod.t
-t/var/.gitignore
+t/release-pod-coverage.t
+t/release-pod-syntax.t
 t/var/oltest.db
 t/var/oltest.sql
-META.yml                                 Module meta-data (added by MakeMaker)
